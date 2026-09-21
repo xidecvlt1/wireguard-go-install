@@ -248,11 +248,15 @@ EOF
 net.ipv4.ip_forward=1
 net.ipv4.conf.all.route_localnet=1
 net.ipv4.conf.default.route_localnet=1
+net.ipv4.conf.all.rp_filter=2
+net.ipv4.conf.default.rp_filter=2
 EOF
 
 	sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
 	sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null 2>&1
 	sysctl -w net.ipv4.conf.default.route_localnet=1 >/dev/null 2>&1
+    sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>&1
+    sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>&1
 	sysctl -p /etc/sysctl.d/99-amneziawg.conf >/dev/null 2>&1
 
 	if command -v netfilter-persistent &>/dev/null; then
