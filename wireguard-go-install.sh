@@ -244,7 +244,7 @@ EOF
 	chmod 600 /etc/wireguard/${SERVER_WG_NIC}.conf
 
 	# Safely enable IP Forwarding & Localnet Routing for Local DNS Intercept
-	cat <<EOF > /etc/sysctl.d/99-amneziawg.conf
+	cat <<EOF > /etc/sysctl.d/99-wireguard.conf
 net.ipv4.ip_forward=1
 net.ipv4.conf.all.route_localnet=1
 net.ipv4.conf.default.route_localnet=1
@@ -257,7 +257,7 @@ EOF
 	sysctl -w net.ipv4.conf.default.route_localnet=1 >/dev/null 2>&1
     sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>&1
     sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>&1
-	sysctl -p /etc/sysctl.d/99-amneziawg.conf >/dev/null 2>&1
+	sysctl -p /etc/sysctl.d/99-wireguard.conf >/dev/null 2>&1
 
 	if command -v netfilter-persistent &>/dev/null; then
 		netfilter-persistent save >/dev/null 2>&1
@@ -266,6 +266,34 @@ EOF
 	echo -e "\n${GREEN}[5/5] Enabling and starting WireGuard service...${NC}"
 	systemctl enable wg-quick@${SERVER_WG_NIC}
 	systemctl restart wg-quick@${SERVER_WG_NIC}
+
+	# Add cronjob to reset disconnected peer
+	cat <<'EOF' > /usr/local/bin/reset-disconnected-peer.sh
+#!/bin/bash
+INTERFACE="awg0"
+CONFIG_FILE="/etc/wireguard/wg0.conf"
+TIMEOUT=180
+NOW=$(date +%s)
+
+awg show $INTERFACE dump | tail -n +2 | while read -r line; do
+    PUBLIC_KEY=$(echo "$line" | awk '{print $1}')
+    LATEST_HANDSHAKE=$(echo "$line" | awk '{print $5}')
+    
+    if [ "$LATEST_HANDSHAKE" -ne 0 ]; then
+        DIFF=$((NOW - LATEST_HANDSHAKE))
+        
+        if [ $DIFF -gt $TIMEOUT ]; then
+            wg set $INTERFACE peer "$PUBLIC_KEY" remove
+            wg syncconf $INTERFACE <(wg-quick strip $INTERFACE)
+        fi
+    fi
+done
+EOF
+	chmod +x /usr/local/bin/reset-disconnected-peer.sh
+	
+	echo "* * * * * root /usr/local/bin/reset-disconnected-peer.sh >/dev/null 2>&1" > /etc/cron.d/wg-peer-reset
+	chmod 644 /etc/cron.d/wg-peer-reset
+	systemctl restart cron 2>/dev/null || systemctl restart crond 2>/dev/null
 
 	echo -e "\n${GREEN}WireGuard (wireguard-go) installed successfully!${NC}"
 
@@ -457,6 +485,9 @@ function uninstallWireGuard() {
 	echo -e "${GREEN}[4/4] Cleaning configuration files...${NC}"
 	rm -rf /etc/wireguard
 	rm -f /root/${SERVER_WG_NIC}-client-*.conf
+	rm -f /usr/local/bin/reset-disconnected-peer.sh
+	rm -f /etc/cron.d/wg-peer-reset
+	systemctl restart cron 2>/dev/null || systemctl restart crond 2>/dev/null
 
 	echo -e "\n${GREEN}WireGuard has been uninstalled!${NC}"
     echo ""
